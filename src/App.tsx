@@ -47,9 +47,10 @@ export default function App() {
   const isBusy = status === "installing";
 
   const refreshSeqRef = useRef(0);
-  const upiaFoundRef = useRef<boolean | null>(null);
+  const photoshopFoundRef = useRef<boolean | null>(null);
   const isBusyRef = useRef(false);
-  upiaFoundRef.current = upiaFound;
+  const photoshopFound = psStatus ? psStatus.photoshop_versions.length > 0 : null;
+  photoshopFoundRef.current = photoshopFound;
   isBusyRef.current = isBusy;
 
   const refreshPsStatus = useCallback(() => {
@@ -60,9 +61,9 @@ export default function App() {
         if (seq !== refreshSeqRef.current) return;
         setPsStatus(result);
         setUpiaFound(Boolean(result.upia_path));
-        if (!result.upia_path) {
+        if (result.photoshop_versions.length === 0) {
           setStatus("error");
-          setMessage("未找到 Adobe 安装器，请安装 Photoshop 2022+");
+          setMessage("未检测到 Photoshop 2022+，请先安装 Photoshop");
         }
       })
       .catch((err) => {
@@ -79,6 +80,12 @@ export default function App() {
 
   const installCcx = useCallback(
     (path: string) => {
+      if (photoshopFound === false) {
+        setStatus("error");
+        setMessage("未检测到 Photoshop 2022+，请先安装 Photoshop");
+        return;
+      }
+
       setStatus("installing");
       setMessage("正在安装…");
 
@@ -93,11 +100,11 @@ export default function App() {
           setMessage(`安装出错: ${err}`);
         });
     },
-    [refreshPsStatus]
+    [photoshopFound, refreshPsStatus]
   );
 
   const pickCcx = async () => {
-    if (upiaFound === false || isBusy) return;
+    if (photoshopFound === false || isBusy) return;
 
     const selected = await open({
       multiple: false,
@@ -157,7 +164,7 @@ export default function App() {
           (event) => {
             if (dragTimer) clearTimeout(dragTimer);
             setDragging(false);
-            if (upiaFoundRef.current === false || isBusyRef.current) return;
+            if (photoshopFoundRef.current === false || isBusyRef.current) return;
 
             const payload = event.payload as DragDropPayload;
             const paths = payload?.paths ?? [];
@@ -231,7 +238,7 @@ export default function App() {
       <h1 className="title">PS 增效工具安装器</h1>
       <p className="subtitle">支持 Photoshop 2022+ · 无需 Creative Cloud</p>
 
-      <button className={zoneClass} type="button" onClick={pickCcx} disabled={upiaFound === false || isBusy}>
+      <button className={zoneClass} type="button" onClick={pickCcx} disabled={photoshopFound === false || isBusy}>
         <div className="drop-icon">{isBusy ? <span className="progress-ring" /> : "📦"}</div>
         <div className="drop-text">
           {isBusy ? (
@@ -299,10 +306,12 @@ export default function App() {
       </section>
 
       <div className="footer">
-        {upiaFound === true
-          ? "✓ 已检测到 Adobe 安装器"
-          : upiaFound === false
-          ? "✗ 未检测到 Adobe 安装器"
+        {photoshopFound === true
+          ? upiaFound
+            ? "✓ 已检测到 Photoshop · Adobe 安装器可用"
+            : "✓ 已检测到 Photoshop · 使用本地安装"
+          : photoshopFound === false
+          ? "✗ 未检测到 Photoshop"
           : "检测中…"}
       </div>
     </div>

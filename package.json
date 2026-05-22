@@ -1,6 +1,6 @@
 {
   "name": "baitubian-installer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "PS 增效工具安装器",
   "type": "module",
   "scripts": {
