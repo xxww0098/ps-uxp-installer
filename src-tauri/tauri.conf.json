@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "PS 增效工具安装器",
+  "version": "1.0.0",
+  "identifier": "com.baitubian.installer",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PS 增效工具安装器",
+        "width": 520,
+        "height": 560,
+        "resizable": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "nsis"],
+    "icon": ["icons/icon.icns", "icons/icon.ico"],
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.13"
+    }
+  }
+}

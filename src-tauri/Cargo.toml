@@ -1,0 +1,19 @@
+[package]
+name = "baitubian-installer"
+version = "1.0.0"
+description = "PS 增效工具安装器"
+edition = "2021"
+rust-version = "1.75"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = "2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
