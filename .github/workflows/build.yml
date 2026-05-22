@@ -70,8 +70,31 @@ jobs:
         with:
           path: artifacts
 
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release-assets
+
+          dmg=$(find artifacts/bundle-macos -name '*.dmg' -print -quit)
+          if [ -n "$dmg" ]; then
+            cp "$dmg" "release-assets/ps-uxp-installer_${VERSION}_macos_universal.dmg"
+          fi
+
+          exe=$(find artifacts/bundle-windows -name '*-setup.exe' -print -quit)
+          if [ -n "$exe" ]; then
+            cp "$exe" "release-assets/ps-uxp-installer_${VERSION}_windows_x64-setup.exe"
+          fi
+
+          msi=$(find artifacts/bundle-windows -name '*.msi' -print -quit)
+          if [ -n "$msi" ]; then
+            cp "$msi" "release-assets/ps-uxp-installer_${VERSION}_windows_x64.msi"
+          fi
+
+          ls -lh release-assets/
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: artifacts/**/*
+          files: release-assets/*
