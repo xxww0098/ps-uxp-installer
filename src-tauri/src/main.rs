@@ -1,3 +1,5 @@
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -36,22 +38,6 @@ fn extract_year_token(name: &str) -> Option<String> {
     name.split(|c: char| !c.is_ascii_digit())
         .find(|token| token.len() == 4 && token.chars().all(|c| c.is_ascii_digit()))
         .map(str::to_string)
-}
-
-fn decode_console_output(stdout: &[u8], stderr: &[u8]) -> String {
-    let mut combined: Vec<u8> = Vec::with_capacity(stdout.len() + stderr.len() + 1);
-    combined.extend_from_slice(stdout);
-    if !stdout.is_empty() && !stderr.is_empty() {
-        combined.push(b'\n');
-    }
-    combined.extend_from_slice(stderr);
-
-    // If valid UTF-8 — use it. Otherwise fall back to lossy decode (which is
-    // still readable for ASCII parts; non-UTF-8 bytes become U+FFFD).
-    match std::str::from_utf8(&combined) {
-        Ok(s) => s.trim().to_string(),
-        Err(_) => String::from_utf8_lossy(&combined).trim().to_string(),
-    }
 }
 
 #[derive(Serialize, Clone)]
@@ -121,10 +107,6 @@ fn get_upia_path() -> Option<String> {
         }
     }
     None
-}
-
-fn upia_install_flag() -> &'static str {
-    "--install"
 }
 
 fn read_dir(path: &Path) -> Vec<fs::DirEntry> {
@@ -243,19 +225,6 @@ fn ccx_metadata(path: &Path) -> Result<(String, String, String, Value), String> 
     Ok((id, name, version, manifest))
 }
 
-fn plugin_install_dirs(id: &str) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for root in uxp_roots() {
-        for entry in read_dir(&root.join("Plugins/External")) {
-            let path = entry.path();
-            if path.is_dir() && plugin_id_for_path(&path).as_deref() == Some(id) {
-                paths.push(path);
-            }
-        }
-    }
-    paths
-}
-
 fn write_plugins_info_entry(
     root: &Path,
     id: &str,
@@ -292,7 +261,13 @@ fn write_plugins_info_entry(
     let _ = write_json_atomic(&info_path, &json);
 }
 
-fn install_ccx_locally(path: &Path, id: &str, name: &str, version: &str, manifest: &Value) -> Result<(), String> {
+fn install_ccx_locally(
+    path: &Path,
+    id: &str,
+    name: &str,
+    version: &str,
+    manifest: &Value,
+) -> Result<PathBuf, String> {
     let root = user_uxp_root()
         .filter(|root| root.exists() || fs::create_dir_all(root).is_ok())
         .or_else(|| uxp_roots().into_iter().next())
@@ -319,7 +294,7 @@ fn install_ccx_locally(path: &Path, id: &str, name: &str, version: &str, manifes
         host_min_version_from_manifest(manifest).unwrap_or_else(|| "23.0".to_string());
     write_plugins_info_entry(&root, id, name, version, &install_dir_name, &host_min_version);
 
-    Ok(())
+    Ok(install_dir)
 }
 
 fn add_uxp_plugin(
@@ -702,6 +677,19 @@ fn remove_plugins_info_entry(root: &Path, id: &str) {
     }
 }
 
+fn map_remove_error(action: &str, err: io::Error) -> String {
+    let locked = matches!(err.raw_os_error(), Some(32) | Some(33))
+        || err.kind() == io::ErrorKind::PermissionDenied;
+    if locked {
+        format!(
+            "{}失败: 文件被占用。请先完全关闭 Photoshop（包括系统托盘图标）后重试。\n详细: {}",
+            action, err
+        )
+    } else {
+        format!("{}失败: {}", action, err)
+    }
+}
+
 fn remove_third_party_uxp_files(id: &str) -> Result<usize, String> {
     let mut removed = 0;
 
@@ -712,7 +700,7 @@ fn remove_third_party_uxp_files(id: &str) -> Result<usize, String> {
                 continue;
             }
             if plugin_id_for_path(&path).as_deref() == Some(id) {
-                fs::remove_dir_all(&path).map_err(|e| format!("删除安装目录失败: {}", e))?;
+                fs::remove_dir_all(&path).map_err(|e| map_remove_error("删除旧版本", e))?;
                 removed += 1;
             }
         }
@@ -721,7 +709,7 @@ fn remove_third_party_uxp_files(id: &str) -> Result<usize, String> {
         for host_entry in read_dir(&plugin_storage) {
             let cache_path = host_entry.path().join("External").join(id);
             if cache_path.exists() {
-                fs::remove_dir_all(&cache_path).map_err(|e| format!("删除缓存目录失败: {}", e))?;
+                fs::remove_dir_all(&cache_path).map_err(|e| map_remove_error("清理缓存", e))?;
                 removed += 1;
             }
         }
@@ -751,7 +739,6 @@ fn get_ps_status() -> PsStatus {
 
 #[tauri::command]
 fn install_ccx(path: String) -> Result<InstallResult, String> {
-    let upia = get_upia_path().ok_or("未找到 UPIA。请确保已安装 Photoshop 2022+。")?;
     let ccx_path = Path::new(&path);
 
     if !ccx_path.exists() {
@@ -760,36 +747,16 @@ fn install_ccx(path: String) -> Result<InstallResult, String> {
 
     let (plugin_id, plugin_name, plugin_version, manifest) = ccx_metadata(ccx_path)?;
 
-    let output = quiet_command(&upia)
-        .arg(upia_install_flag())
-        .arg(&path)
-        .output()
-        .map_err(|e| format!("启动安装器失败: {}", e))?;
-
-    let upia_ok = output.status.success();
-    let needs_local_fallback = !upia_ok || plugin_install_dirs(&plugin_id).is_empty();
-
-    if needs_local_fallback {
+    let install_dir =
         install_ccx_locally(ccx_path, &plugin_id, &plugin_name, &plugin_version, &manifest)?;
-        return Ok(InstallResult {
-            message: if upia_ok {
-                "安装成功，已写入本地 UXP 插件目录。请重启 Photoshop。".to_string()
-            } else {
-                let detail = decode_console_output(&output.stdout, &output.stderr);
-                if detail.is_empty() {
-                    "Adobe 安装器未完成，已改用本地 UXP 安装。请重启 Photoshop。".to_string()
-                } else {
-                    format!(
-                        "Adobe 安装器未完成，已改用本地 UXP 安装。请重启 Photoshop。\n安装器输出: {}",
-                        detail
-                    )
-                }
-            },
-        });
-    }
 
     Ok(InstallResult {
-        message: "安装成功。请重启 Photoshop。".to_string(),
+        message: format!(
+            "已安装 {} {}\n位置: {}\n\n请完全关闭并重启 Photoshop（包括右下角托盘图标），插件菜单里就能看到。",
+            plugin_name,
+            plugin_version,
+            install_dir.display()
+        ),
     })
 }
 

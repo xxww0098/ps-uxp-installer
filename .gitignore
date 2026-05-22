@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-ci/
 src-tauri/target/
 src-tauri/gen/schemas/
 .DS_Store
