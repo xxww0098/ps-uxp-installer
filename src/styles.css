@@ -149,6 +149,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: pre-line;
 }
 
 .status-bar.idle {
